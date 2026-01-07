@@ -1,12 +1,39 @@
 # Social Network System Design
 
-## Overview
+> **Difficulty:** Advanced
+> **Topics:** News Feed, Graph Database, Fanout, Real-time Systems, Content Delivery
+> **Companies:** Meta (Facebook), Twitter/X, Instagram, LinkedIn, TikTok
 
-A **social network** is a platform that enables users to connect, share content, and interact with each other at massive scale.
+---
 
-Examples: Facebook, Twitter/X, Instagram, LinkedIn
+## 1. Problem Statement
 
-## Requirements
+Design a **social networking platform** that enables billions of users to connect, share content, and interact in real-time.
+
+### Core Features
+
+**Users can:**
+- Create profiles and connect with others (follow/friend)
+- Post text, photos, videos
+- View personalized news feed
+- Like, comment, share posts
+- Receive real-time notifications
+- Send direct messages
+- Search for users and content
+
+**System must handle:**
+- 1 billion users, 100 million daily active
+- Billions of posts per day
+- Real-time feed updates
+- Complex feed ranking algorithms
+- Media storage and delivery (CDN)
+- Graph operations (connections, recommendations)
+
+**Real-world Examples:** Facebook, Twitter/X, Instagram, LinkedIn, TikTok
+
+---
+
+## 2. Requirements
 
 ### Functional Requirements
 1. **User profiles**: Create, update, view profiles

@@ -1,193 +1,454 @@
-# Airline Reservation System - OOD Design
+# Airline Reservation System - Object-Oriented Design
 
 **Difficulty:** Intermediate
 **Interview Frequency:** High
-**Key Concepts:** Seat Assignment, Pricing Strategy, Booking Management
-**Companies:** Airlines, Travel Sites, Expedia, Google Flights
+**Key Concepts:** Seat Assignment, Pricing Strategy, Booking Management, Inventory Control
+**Companies:** Airlines, Expedia, Google Flights, Skyscanner, Kayak
+**Estimated Interview Time:** 40-45 minutes
 
 ---
 
 ## Problem Statement
 
-Design an airline reservation system handling flights, seat assignments, bookings, and pricing with support for different fare classes.
+Design an airline reservation system that supports:
+- Flight search by route, date, and class
+- Seat selection and assignment
+- Booking creation and cancellation
+- Multiple fare classes (Economy, Business, First)
+- Dynamic pricing based on demand
+- Passenger management
+- Check-in and boarding processes
+- Overbooking strategies
+
+**Interview Context:** Tests understanding of inventory management, seat allocation algorithms, pricing strategies, and handling real-world constraints like overbooking and cancellations.
 
 ---
 
-## Implementation
+## Requirements
 
-```python
-from enum import Enum
-from datetime import datetime
-from typing import List, Optional
+### Functional Requirements
+1. **Flight Management:** Create flights with routes, schedules, aircraft
+2. **Search:** Find flights by origin, destination, date, class
+3. **Booking:** Reserve seats, assign passengers, process payment
+4. **Seat Selection:** Choose specific seats, handle preferences
+5. **Pricing:** Dynamic pricing, fare classes, discounts
+6. **Check-in:** Online/airport check-in, boarding pass
+7. **Cancellation:** Cancel bookings, process refunds
 
+### Non-Functional Requirements
+1. **Concurrency:** Handle simultaneous bookings
+2. **Availability:** Real-time seat availability
+3. **Performance:** Search < 1s, booking < 2s
+4. **Scalability:** Millions of flights, passengers
 
-class SeatClass(Enum):
-    ECONOMY = "Economy"
-    BUSINESS = "Business"
-    FIRST_CLASS = "First Class"
+---
 
+## Core Concepts
 
-class SeatStatus(Enum):
-    AVAILABLE = "Available"
-    BOOKED = "Booked"
-    BLOCKED = "Blocked"
+### 1. Seat Classes and Pricing
 
+| Class | Price Multiplier | Amenities | Refundable |
+|-------|-----------------|-----------|------------|
+| **Economy** | 1.0x | Basic | No |
+| **Premium Economy** | 1.5x | Extra legroom | Partial |
+| **Business** | 3.0x | Lie-flat, lounge | Yes |
+| **First Class** | 5.0x | Suite, premium meals | Yes |
 
-class Seat:
-    def __init__(self, seat_number: str, seat_class: SeatClass, price: float):
-        self.seat_number = seat_number
-        self.seat_class = seat_class
-        self.price = price
-        self.status = SeatStatus.AVAILABLE
+### 2. Booking States
 
-    def book(self) -> bool:
-        if self.status == SeatStatus.AVAILABLE:
-            self.status = SeatStatus.BOOKED
-            return True
-        return False
+```
+INITIATED → PAYMENT_PENDING → CONFIRMED → CHECKED_IN → BOARDED
+    ↓              ↓              ↓
+CANCELLED      CANCELLED      CANCELLED
+```
 
-    def release(self):
-        self.status = SeatStatus.AVAILABLE
+### 3. Overbooking Strategy
 
+Airlines typically overbook by 5-15% because:
+- Historical no-show rates (5-10%)
+- Last-minute cancellations
+- Revenue optimization
 
-class Passenger:
-    def __init__(self, passenger_id: int, name: str, email: str, passport: str):
-        self.passenger_id = passenger_id
-        self.name = name
-        self.email = email
-        self.passport = passport
+**Risk Management:**
+- Offer compensation (upgrades, vouchers)
+- Book on next available flight
+- Track patterns per route
 
+---
 
-class Flight:
-    def __init__(self, flight_number: str, origin: str, destination: str, departure: datetime, duration_minutes: int):
-        self.flight_number = flight_number
-        self.origin = origin
-        self.destination = destination
-        self.departure = departure
-        self.duration_minutes = duration_minutes
-        self.seats: List[Seat] = []
+## Class Diagram
 
-    def add_seat(self, seat: Seat):
-        self.seats.append(seat)
+```mermaid
+classDiagram
+    class ReservationSystem {
+        -List~Flight~ flights
+        -List~Booking~ bookings
+        -PricingStrategy pricingStrategy
+        +searchFlights(criteria)
+        +createBooking(passenger, flight, seat)
+        +cancelBooking(bookingId)
+        +checkIn(bookingId)
+    }
 
-    def get_available_seats(self, seat_class: Optional[SeatClass] = None) -> List[Seat]:
-        available = [s for s in self.seats if s.status == SeatStatus.AVAILABLE]
-        if seat_class:
-            available = [s for s in available if s.seat_class == seat_class]
-        return available
+    class Flight {
+        -String flightNumber
+        -Airport origin
+        -Airport destination
+        -DateTime departureTime
+        -DateTime arrivalTime
+        -Aircraft aircraft
+        -FlightStatus status
+        +getAvailableSeats(class)
+        +getTotalCapacity()
+        +getOccupancyRate()
+    }
 
-    def __str__(self) -> str:
-        return f"Flight {self.flight_number}: {self.origin} → {self.destination} at {self.departure.strftime('%Y-%m-%d %H:%M')}"
+    class Aircraft {
+        -String model
+        -int totalSeats
+        -List~Seat~ seats
+        -SeatMap seatMap
+        +getSeatByNumber(number)
+        +getAvailableSeats(class)
+    }
 
+    class Seat {
+        -String seatNumber
+        -SeatClass seatClass
+        -SeatType type
+        -SeatStatus status
+        -double basePrice
+        -SeatFeatures features
+        +isAvailable()
+        +book()
+        +release()
+    }
 
-class Reservation:
-    _reservation_counter = 1
+    class SeatClass {
+        <<enumeration>>
+        ECONOMY
+        PREMIUM_ECONOMY
+        BUSINESS
+        FIRST_CLASS
+    }
 
-    def __init__(self, passenger: Passenger, flight: Flight, seat: Seat):
-        self.reservation_id = f"RES{Reservation._reservation_counter:06d}"
-        Reservation._reservation_counter += 1
-        self.passenger = passenger
-        self.flight = flight
-        self.seat = seat
-        self.booking_time = datetime.now()
-        self.price = seat.price
+    class SeatType {
+        <<enumeration>>
+        WINDOW
+        AISLE
+        MIDDLE
+        EXIT_ROW
+    }
 
-    def __str__(self) -> str:
-        return (f"Reservation {self.reservation_id}: {self.passenger.name} - "
-                f"{self.flight.flight_number} Seat {self.seat.seat_number} ({self.seat.seat_class.value}) - ${self.price:.2f}")
+    class SeatStatus {
+        <<enumeration>>
+        AVAILABLE
+        SELECTED
+        BOOKED
+        BLOCKED
+        MAINTENANCE
+    }
 
+    class Passenger {
+        -String passengerId
+        -String name
+        -String email
+        -String passportNumber
+        -Date dateOfBirth
+        -FrequentFlyer frequentFlyer
+        +getBookings()
+        +getLoyaltyStatus()
+    }
 
-class ReservationSystem:
-    def __init__(self):
-        self.flights: List[Flight] = []
-        self.reservations: List[Reservation] = []
+    class Booking {
+        -String bookingId
+        -Passenger passenger
+        -Flight flight
+        -Seat seat
+        -BookingStatus status
+        -double totalPrice
+        -Payment payment
+        -DateTime bookingTime
+        +confirm()
+        +cancel()
+        +checkIn()
+        +getBoardingPass()
+    }
 
-    def add_flight(self, flight: Flight):
-        self.flights.append(flight)
+    class BookingStatus {
+        <<enumeration>>
+        INITIATED
+        PAYMENT_PENDING
+        CONFIRMED
+        CHECKED_IN
+        BOARDED
+        CANCELLED
+        NO_SHOW
+    }
 
-    def search_flights(self, origin: str, destination: str, date: datetime) -> List[Flight]:
-        return [
-            f for f in self.flights
-            if f.origin == origin and f.destination == destination and f.departure.date() == date.date()
-        ]
+    class Payment {
+        -String paymentId
+        -double amount
+        -PaymentMethod method
+        -PaymentStatus status
+        +process()
+        +refund(amount)
+    }
 
-    def book_seat(self, passenger: Passenger, flight: Flight, seat_number: str) -> Optional[Reservation]:
-        seat = next((s for s in flight.seats if s.seat_number == seat_number), None)
+    class PricingStrategy {
+        <<interface>>
+        +calculatePrice(flight, seat, date)*
+    }
 
-        if not seat:
-            print(f"Seat {seat_number} not found")
-            return None
+    class DynamicPricing {
+        +calculatePrice(flight, seat, date)
+    }
 
-        if not seat.book():
-            print(f"Seat {seat_number} not available")
-            return None
+    class Airport {
+        -String code
+        -String name
+        -String city
+        -String country
+    }
 
-        reservation = Reservation(passenger, flight, seat)
-        self.reservations.append(reservation)
-        print(f"✓ {reservation}")
-        return reservation
-
-    def cancel_reservation(self, reservation_id: str) -> bool:
-        reservation = next((r for r in self.reservations if r.reservation_id == reservation_id), None)
-        if reservation:
-            reservation.seat.release()
-            self.reservations.remove(reservation)
-            print(f"✓ Reservation {reservation_id} cancelled")
-            return True
-        return False
-
-
-def main():
-    system = ReservationSystem()
-
-    # Create flight
-    flight = Flight("AA123", "NYC", "LAX", datetime(2024, 12, 25, 8, 0), 360)
-
-    # Add seats
-    for i in range(1, 4):
-        flight.add_seat(Seat(f"1{i}", SeatClass.FIRST_CLASS, 800.0))
-    for i in range(1, 11):
-        flight.add_seat(Seat(f"2{i}", SeatClass.BUSINESS, 400.0))
-    for i in range(1, 31):
-        flight.add_seat(Seat(f"3{i}", SeatClass.ECONOMY, 200.0))
-
-    system.add_flight(flight)
-
-    # Search flights
-    print(f"\nSearching flights NYC → LAX on 2024-12-25")
-    flights = system.search_flights("NYC", "LAX", datetime(2024, 12, 25))
-    for f in flights:
-        print(f"  {f}")
-        available = f.get_available_seats()
-        print(f"    Available seats: {len(available)}")
-
-    # Create passengers and book
-    passenger1 = Passenger(1, "Alice", "alice@email.com", "P123456")
-    passenger2 = Passenger(2, "Bob", "bob@email.com", "P789012")
-
-    print("\n--- Bookings ---")
-    reservation1 = system.book_seat(passenger1, flight, "11")
-    reservation2 = system.book_seat(passenger2, flight, "21")
-
-    # Try duplicate booking
-    reservation3 = system.book_seat(passenger2, flight, "11")
-
-
-if __name__ == "__main__":
-    main()
+    ReservationSystem --> Flight
+    ReservationSystem --> Booking
+    ReservationSystem --> PricingStrategy
+    Flight --> Aircraft
+    Flight --> Airport
+    Aircraft --> Seat
+    Seat --> SeatClass
+    Seat --> SeatType
+    Seat --> SeatStatus
+    Booking --> Passenger
+    Booking --> Flight
+    Booking --> Seat
+    Booking --> BookingStatus
+    Booking --> Payment
+    PricingStrategy <|-- DynamicPricing
 ```
 
 ---
 
+## Key Components
+
+### 1. Seat Assignment Algorithm
+
+**Simple First-Available:**
+```
+Find first available seat in requested class
+```
+
+**Preference-Based:**
+```
+1. Filter by class
+2. Apply preferences (window/aisle, exit row)
+3. Optimize for groups (keep together)
+4. Return best match
+```
+
+**Revenue Optimization:**
+```
+Reserve premium seats (exit row, front) for higher-paying passengers
+```
+
+### 2. Dynamic Pricing
+
+**Factors:**
+- Days until departure (expensive close to date)
+- Current occupancy (expensive when >70% full)
+- Historical demand for route
+- Competitor pricing
+- Day of week, seasonality
+
+**Formula:**
+```
+finalPrice = basePrice × demandMultiplier × timeMultiplier × classMultiplier
+```
+
+### 3. Overbooking Management
+
+**Algorithm:**
+```
+maxBookings = capacity × (1 + overbookingRate)
+if bookings < maxBookings:
+    allow booking
+else:
+    add to waitlist
+```
+
+**When overbooked:**
+1. Request volunteers (offer compensation)
+2. Deny boarding to last-booked passengers
+3. Rebook on next flight + compensation
+
+---
+
 ## Design Patterns
-- **Strategy Pattern:** Pricing strategies for different classes
-- **Factory Pattern:** Seat creation
-- **State Pattern:** Seat status management
 
-## Extensions
-- Add baggage allowance
-- Implement waitlist
-- Support connecting flights
-- Add meal preferences
+### 1. Strategy Pattern (Pricing)
+- Different pricing algorithms (fixed, dynamic, auction)
+- Switchable at runtime
 
-This tests seat assignment logic and booking conflict handling.
+### 2. Factory Pattern (Seat Creation)
+- Create seats based on aircraft configuration
+- Standard layouts (Boeing 737, A320)
+
+### 3. State Pattern (Booking States)
+- INITIATED → CONFIRMED → CHECKED_IN → BOARDED
+- State-specific operations
+
+### 4. Observer Pattern (Notifications)
+- Email confirmations
+- SMS reminders
+- Flight status updates
+
+### 5. Composite Pattern (Multi-leg Flights)
+- Connecting flights as composite
+- Single booking for multiple segments
+
+---
+
+## Implementation Approach
+
+### Phase 1: Core Structure (10 min)
+1. Flight, Seat, Passenger, Booking classes
+2. Enums: SeatClass, SeatStatus, BookingStatus
+3. Basic search and book
+
+### Phase 2: Seat Management (10 min)
+1. Seat selection logic
+2. Availability checking
+3. Prevent double booking
+
+### Phase 3: Pricing (10 min)
+1. Base pricing by class
+2. Dynamic pricing strategy
+3. Calculate total with taxes
+
+### Phase 4: Advanced Features (10 min)
+1. Check-in process
+2. Cancellation with refunds
+3. Overbooking handling
+
+---
+
+## Trade-offs & Considerations
+
+### 1. Seat Assignment Strategy
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Auto-assign** | Fast, optimized | Less customer control |
+| **Manual select** | Customer choice | May be inefficient |
+| **Hybrid** | Balanced | More complex |
+
+### 2. Pricing Model
+
+| Model | Description | Use Case |
+|-------|-------------|----------|
+| **Fixed** | Same price always | Budget airlines |
+| **Dynamic** | Demand-based | Legacy carriers |
+| **Auction** | Bid for seats | Upgrades |
+
+### 3. Overbooking Rate
+
+- **Low (2-5%):** Safe, less revenue
+- **Medium (5-10%):** Balanced
+- **High (10-15%):** Risky, max revenue
+
+---
+
+## Common Pitfalls
+
+### 1. Not Handling Concurrent Bookings
+❌ Check availability, then book (race condition)
+✅ Use database transactions with locks
+
+### 2. Ignoring Seat Preferences
+❌ Assign any available seat
+✅ Consider passenger preferences (window/aisle)
+
+### 3. Forgetting Group Bookings
+❌ Scatter family across plane
+✅ Keep groups together when possible
+
+### 4. Not Implementing Cancellation Policy
+❌ Full refund anytime
+✅ Apply cancellation fees based on time and class
+
+### 5. Missing Check-in Window
+❌ Allow check-in anytime
+✅ Enforce 24hr before to 1hr before departure
+
+---
+
+## Follow-up Questions
+
+### Easy
+1. **Q:** How would you add baggage allowance?
+   - **A:** Add Baggage class, link to fare class, track weight
+
+2. **Q:** How would you implement meal preferences?
+   - **A:** MealPreference enum, store with passenger profile
+
+3. **Q:** How would you generate boarding passes?
+   - **A:** BoardingPass class with QR code, gate info, boarding time
+
+### Medium
+4. **Q:** How would you handle connecting flights?
+   - **A:** MultiSegmentBooking class, composite pattern, ensure connection times
+
+5. **Q:** How would you implement a waitlist?
+   - **A:** WaitList queue, automatically book when seat available, time-limited
+
+6. **Q:** How would you add frequent flyer miles?
+   - **A:** LoyaltyProgram class, calculate miles based on distance × class multiplier
+
+7. **Q:** How would you handle flight delays/cancellations?
+   - **A:** FlightStatus updates, notify passengers, automatic rebooking options
+
+### Hard
+8. **Q:** How would you optimize seat assignment for revenue?
+   - **A:** Hold premium seats (exit, front) for last-minute bookings at premium
+
+9. **Q:** How would you implement group discounts?
+   - **A:** GroupBooking class, volume-based pricing, keep seats together
+
+10. **Q:** How would you handle involuntary denied boarding?
+    - **A:** Algorithm: last booked, lowest fare, no status passengers first, compensation scale
+
+11. **Q:** How would you implement a bidding system for upgrades?
+    - **A:** UpgradeBid class, auction before departure, highest bidders get upgrades
+
+12. **Q:** How would you design for global distribution systems (GDS)?
+    - **A:** API layer, inventory sync, real-time updates, standard formats (EDIFACT)
+
+---
+
+## Key Takeaways
+
+### ✅ What Interviewers Look For
+1. Seat inventory management
+2. Concurrency handling (double booking prevention)
+3. Pricing strategies
+4. Real-world constraints (overbooking, cancellations)
+
+### 📋 Interview Strategy
+1. **Clarify (5 min):** Single vs multiple flights? Seat selection? Pricing?
+2. **Design (10 min):** Core classes, relationships
+3. **Implement (20 min):** Search, book, seat assignment
+4. **Discuss (10 min):** Overbooking, pricing, edge cases
+
+### 🎯 Time Management
+
+| Time | Focus | Priority |
+|------|-------|----------|
+| 0-5 min | Requirements | Critical |
+| 5-15 min | Class design | Critical |
+| 15-30 min | Booking logic | Critical |
+| 30-40 min | Pricing, edge cases | High |
+
+---
+
+**Pro Tip:** Focus on seat inventory management and preventing double bookings. Mention overbooking as a real-world consideration. Discuss trade-offs between auto-assign (efficient) vs manual selection (customer preference).

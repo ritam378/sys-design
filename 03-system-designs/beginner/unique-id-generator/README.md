@@ -26,7 +26,37 @@ Design a **distributed unique ID generator** that creates globally unique IDs ac
 
 ---
 
-## 2. Approaches
+## 2. Capacity Estimation
+
+### Traffic Estimates
+
+```python
+# Assumptions:
+Daily Active Users (DAU): 500 million
+Posts per user per day: 2
+Daily posts: 500M × 2 = 1 billion posts/day
+
+# ID Generation Rate:
+IDs per second: 1B / 86,400 = ~11,600 IDs/sec
+Peak QPS (3x average): ~35,000 IDs/sec
+
+# Storage (IDs only):
+ID size: 8 bytes (64 bits)
+Daily storage: 1B × 8 bytes = 8 GB/day
+Annual storage: 8 GB × 365 = 2.9 TB/year
+```
+
+### Latency Requirements
+
+```python
+p50 latency: < 1ms
+p99 latency: < 5ms
+Availability: 99.99% (52 minutes downtime/year)
+```
+
+---
+
+## 3. Approaches
 
 ### Approach 1: UUID (128-bit)
 
@@ -263,7 +293,109 @@ if __name__ == "__main__":
 
 ---
 
-## 4. Capacity Analysis
+## 4. High-Level Design
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client Applications                       │
+│         (Mobile Apps, Web Servers, Backend Services)            │
+└────────────┬──────────────┬──────────────┬──────────────────────┘
+             │              │              │
+             ▼              ▼              ▼
+      ┌───────────┐   ┌───────────┐   ┌───────────┐
+      │   ID Gen  │   │   ID Gen  │   │   ID Gen  │
+      │  Server 1 │   │  Server 2 │   │  Server N │
+      │           │   │           │   │           │
+      │ Machine   │   │ Machine   │   │ Machine   │
+      │   ID: 1   │   │   ID: 2   │   │   ID: N   │
+      └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
+            │               │               │
+            │         ┌─────┴─────┐         │
+            │         │           │         │
+            └────────►│    NTP    │◄────────┘
+                      │  Servers  │
+                      │           │
+                      └───────────┘
+                 (Clock Synchronization)
+
+┌───────────────────────────────────────────────────────────────────┐
+│                    Configuration Management                        │
+│              (ZooKeeper / etcd / Consul)                          │
+│                                                                   │
+│  - Machine ID Registry                                            │
+│  - Server Health Monitoring                                       │
+│  - Configuration Distribution                                     │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Components
+
+#### 1. ID Generator Service
+
+```python
+# Stateless service running on multiple machines
+# Each machine has unique machine_id
+# Generates IDs independently without coordination
+
+class IDGeneratorService:
+    def __init__(self):
+        self.machine_id = self._register_machine()
+        self.generator = SnowflakeIDGenerator(self.machine_id)
+
+    def generate(self) -> int:
+        """Generate single ID"""
+        return self.generator.generate_id()
+
+    def generate_batch(self, count: int) -> List[int]:
+        """Generate batch of IDs for efficiency"""
+        return [self.generator.generate_id() for _ in range(count)]
+```
+
+#### 2. Load Balancer
+
+```python
+# Distributes requests across ID generator servers
+# Any server can handle any request (stateless)
+
+┌────────────┐
+│   Nginx    │  Round-robin or least-connections
+│    Load    │  No sticky sessions needed
+│  Balancer  │
+└────────────┘
+```
+
+#### 3. Clock Synchronization (NTP)
+
+```python
+# All servers sync with NTP servers
+# Keeps clock drift < 1ms
+# Critical for maintaining time-sortability
+
+Configuration:
+server time.google.com
+server time.cloudflare.com
+server time.apple.com
+```
+
+#### 4. Machine ID Registry (ZooKeeper/etcd)
+
+```python
+# Centralized registry for machine IDs
+# Handles machine registration and deregistration
+# Recycles IDs when machines go offline
+
+/snowflake/
+  /machines/
+    /1 -> {"host": "server1.example.com", "status": "active"}
+    /2 -> {"host": "server2.example.com", "status": "active"}
+    /3 -> {"host": "server3.example.com", "status": "inactive"}
+```
+
+---
+
+## 5. Capacity Analysis
 
 ### Throughput
 
@@ -501,4 +633,493 @@ console.log(new Date(timestamp));  // Message creation time
 - Relies on clock synchronization (NTP)
 - Reveals timestamp (privacy consideration)
 
-**Next:** Learn about [Load Balancing](../../../01-fundamentals/networking/load-balancing.md) strategies.
+---
+
+## 11. Deep Dive: Additional Approaches
+
+### Approach 4: ULID (Universally Unique Lexicographically Sortable ID)
+
+```python
+import time
+import random
+
+class ULIDGenerator:
+    """
+    ULID Format (128 bits):
+    - 48 bits: Timestamp (milliseconds)
+    - 80 bits: Random
+
+    Advantages:
+    - Lexicographically sortable (can be stored as string)
+    - 128-bit random component reduces collision risk
+    - Case-insensitive Base32 encoding
+    """
+
+    BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+    def generate(self) -> str:
+        """Generate ULID string (26 characters)"""
+        timestamp_ms = int(time.time() * 1000)
+
+        # Encode timestamp (10 chars)
+        timestamp_part = self._encode_time(timestamp_ms, 10)
+
+        # Encode random (16 chars)
+        random_part = self._encode_random(16)
+
+        return timestamp_part + random_part
+
+    def _encode_time(self, timestamp_ms: int, length: int) -> str:
+        result = ""
+        for _ in range(length):
+            result = self.BASE32[timestamp_ms % 32] + result
+            timestamp_ms //= 32
+        return result
+
+    def _encode_random(self, length: int) -> str:
+        return "".join(random.choice(self.BASE32) for _ in range(length))
+
+# Example
+generator = ULIDGenerator()
+ulid = generator.generate()
+print(ulid)  # "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+```
+
+**ULID vs Snowflake:**
+
+| Feature | ULID | Snowflake |
+|---------|------|-----------|
+| Size | 128 bits | 64 bits |
+| Format | String (26 chars) | Integer |
+| Sortable | ✅ Yes | ✅ Yes |
+| Random component | 80 bits | 12 bits (sequence) |
+| Machine ID needed | ❌ No | ✅ Yes |
+| Collision risk | Very low | Zero (with proper machine ID) |
+
+---
+
+### Approach 5: MongoDB ObjectId
+
+```python
+import time
+import os
+import random
+
+class ObjectIdGenerator:
+    """
+    MongoDB ObjectId (96 bits / 12 bytes):
+    - 4 bytes: Timestamp (seconds)
+    - 5 bytes: Random value (process + machine)
+    - 3 bytes: Incrementing counter
+    """
+
+    def __init__(self):
+        self.counter = random.randint(0, 0xFFFFFF)
+        self.random_value = os.urandom(5)
+
+    def generate(self) -> bytes:
+        timestamp = int(time.time()).to_bytes(4, 'big')
+        counter_bytes = (self.counter % 0xFFFFFF).to_bytes(3, 'big')
+        self.counter += 1
+
+        return timestamp + self.random_value + counter_bytes
+
+    def to_hex(self, object_id: bytes) -> str:
+        """Convert to hex string (24 characters)"""
+        return object_id.hex()
+
+# Example
+generator = ObjectIdGenerator()
+object_id = generator.generate()
+print(generator.to_hex(object_id))  # "507f1f77bcf86cd799439011"
+```
+
+---
+
+### Approach 6: Instagram's Sharded ID
+
+```python
+"""
+Instagram uses modified Snowflake with PostgreSQL:
+
+64-bit ID structure:
+- 41 bits: Timestamp (milliseconds)
+- 13 bits: Shard ID (8192 shards)
+- 10 bits: Auto-increment sequence (1024 per millisecond)
+
+Key difference: Shard ID is part of the ID itself
+This allows Instagram to know which database shard to query
+just by looking at the ID!
+"""
+
+class InstagramIDGenerator:
+    def __init__(self, shard_id: int):
+        self.shard_id = shard_id  # 0-8191
+        self.sequence = 0
+        self.last_timestamp = -1
+
+        # PostgreSQL sequence per shard
+        self.postgres_sequence = f"CREATE SEQUENCE shard_{shard_id}_seq"
+
+    def generate_id(self) -> int:
+        timestamp = int(time.time() * 1000)
+
+        if timestamp == self.last_timestamp:
+            self.sequence = (self.sequence + 1) & 0x3FF
+        else:
+            self.sequence = 0
+
+        self.last_timestamp = timestamp
+
+        # Construct ID
+        return ((timestamp - EPOCH) << 23) | (self.shard_id << 10) | self.sequence
+
+    def extract_shard(self, id: int) -> int:
+        """Extract shard ID from Instagram ID"""
+        return (id >> 10) & 0x1FFF
+```
+
+**Why Instagram chose this:**
+- Each photo belongs to a user
+- User IDs are hashed to shards
+- Photo IDs embed the shard ID
+- Query: "Get photo 12345" → Extract shard → Query correct database
+
+---
+
+## 12. Trade-offs & Design Decisions
+
+### 1. Integer vs String IDs
+
+**Integer (Snowflake):**
+- ✅ Space efficient (8 bytes)
+- ✅ Fast comparisons
+- ✅ Database indexing optimized
+- ❌ Not URL-safe without encoding
+
+**String (UUID, ULID):**
+- ✅ URL-safe
+- ✅ Human-readable
+- ❌ Larger (16-36 bytes)
+- ❌ Slower comparisons
+
+**Decision:** Use integers for internal IDs, encode to Base62 for URLs
+
+```python
+def encode_base62(num: int) -> str:
+    """Encode integer ID to Base62 for URLs"""
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if num == 0:
+        return alphabet[0]
+
+    result = ""
+    while num:
+        result = alphabet[num % 62] + result
+        num //= 62
+    return result
+
+# Example
+internal_id = 123456789012345678  # Snowflake ID
+url_id = encode_base62(internal_id)  # "1T7kM7v9b4"
+```
+
+---
+
+### 2. Embedded Metadata vs Pure Random
+
+**Embedded Metadata (Snowflake, Instagram):**
+- ✅ Can extract timestamp, shard, machine
+- ✅ Useful for debugging
+- ✅ Can route based on ID
+- ❌ Privacy concern (reveals timing)
+- ❌ Less flexibility (bits are allocated)
+
+**Pure Random (UUID v4):**
+- ✅ No information leakage
+- ✅ Maximum entropy
+- ❌ Can't extract metadata
+- ❌ Not sortable
+
+**Decision:** Depends on use case
+- **Public IDs** (user-facing): Use pure random or ULID
+- **Internal IDs** (database): Use Snowflake for sortability
+
+---
+
+### 3. Centralized vs Decentralized
+
+**Centralized (Database auto-increment):**
+- ✅ Guaranteed uniqueness
+- ✅ Simple logic
+- ❌ Single point of failure
+- ❌ Performance bottleneck
+- ❌ Hard to scale
+
+**Decentralized (Snowflake):**
+- ✅ No coordination needed
+- ✅ High availability
+- ✅ Linear scalability
+- ❌ Requires machine ID management
+- ❌ Clock synchronization needed
+
+**Hybrid (Ticket Server):**
+```python
+"""
+Flickr's approach: Pre-allocate ID ranges
+
+Ticket Server allocates ranges:
+- Server A: 1-1000
+- Server B: 1001-2000
+- Server C: 2001-3000
+
+Each server generates IDs from its range
+No coordination needed until range exhausted
+"""
+
+class TicketServerClient:
+    def __init__(self):
+        self.current_id = 0
+        self.max_id = 0
+
+    def get_id(self) -> int:
+        if self.current_id >= self.max_id:
+            # Request new range from ticket server
+            self.current_id, self.max_id = self._request_range()
+
+        self.current_id += 1
+        return self.current_id
+
+    def _request_range(self) -> tuple:
+        """Request ID range from central ticket server"""
+        response = requests.post("http://ticket-server/allocate", json={"size": 1000})
+        return response.json()["start"], response.json()["end"]
+```
+
+---
+
+## 13. Monitoring & Observability
+
+### Key Metrics to Monitor
+
+```python
+# 1. ID Generation Rate
+ids_generated_per_second = Counter("snowflake_ids_generated_total")
+
+# 2. Sequence Overflow Events
+sequence_overflows = Counter("snowflake_sequence_overflows_total")
+# When sequence hits 4096 in single millisecond
+
+# 3. Clock Drift Events
+clock_drift_events = Counter("snowflake_clock_backwards_total")
+# When clock moves backwards
+
+# 4. Generation Latency
+id_generation_latency = Histogram("snowflake_generation_latency_seconds")
+
+# 5. Machine ID Conflicts
+machine_id_conflicts = Counter("snowflake_machine_id_conflicts_total")
+```
+
+### Alerting Rules
+
+```yaml
+# Alert if clock moves backwards significantly
+- alert: ClockMovedBackwards
+  expr: increase(snowflake_clock_backwards_total[5m]) > 0
+  severity: critical
+  annotations:
+    description: "Server clock moved backwards - check NTP"
+
+# Alert if sequence overflows frequently (high load)
+- alert: HighSequenceOverflow
+  expr: rate(snowflake_sequence_overflows_total[1m]) > 100
+  severity: warning
+  annotations:
+    description: "Sequence overflowing frequently - consider scaling"
+
+# Alert if generation latency is high
+- alert: HighIDGenerationLatency
+  expr: histogram_quantile(0.99, snowflake_generation_latency_seconds) > 0.005
+  severity: warning
+  annotations:
+    description: "p99 ID generation latency > 5ms"
+```
+
+---
+
+## 14. Testing Strategies
+
+### 1. Uniqueness Testing
+
+```python
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+
+class TestSnowflakeUniqueness(unittest.TestCase):
+    def test_single_threaded_uniqueness(self):
+        """Test IDs are unique in single thread"""
+        generator = SnowflakeIDGenerator(machine_id=1)
+        ids = set(generator.generate_id() for _ in range(100000))
+
+        # All IDs should be unique
+        self.assertEqual(len(ids), 100000)
+
+    def test_multi_threaded_uniqueness(self):
+        """Test IDs are unique across threads"""
+        generator = SnowflakeIDGenerator(machine_id=1)
+
+        def generate_batch():
+            return [generator.generate_id() for _ in range(10000)]
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(lambda _: generate_batch(), range(10)))
+
+        all_ids = [id for batch in results for id in batch]
+
+        # All IDs should be unique even across threads
+        self.assertEqual(len(set(all_ids)), len(all_ids))
+
+    def test_multi_machine_uniqueness(self):
+        """Test IDs are unique across machines"""
+        generators = [SnowflakeIDGenerator(machine_id=i) for i in range(10)]
+
+        all_ids = []
+        for gen in generators:
+            all_ids.extend([gen.generate_id() for _ in range(10000)])
+
+        # All IDs should be unique across machines
+        self.assertEqual(len(set(all_ids)), len(all_ids))
+```
+
+### 2. Sortability Testing
+
+```python
+def test_sortability(self):
+    """Test IDs are roughly sorted by time"""
+    generator = SnowflakeIDGenerator(machine_id=1)
+
+    ids = []
+    for _ in range(1000):
+        ids.append(generator.generate_id())
+        time.sleep(0.001)  # 1ms delay
+
+    # IDs should be in ascending order (roughly)
+    self.assertEqual(ids, sorted(ids))
+```
+
+### 3. Clock Backwards Testing
+
+```python
+def test_clock_backwards(self):
+    """Test handling of clock moving backwards"""
+    generator = SnowflakeIDGenerator(machine_id=1)
+
+    # Generate ID
+    id1 = generator.generate_id()
+
+    # Simulate clock going backwards
+    generator.last_timestamp = generator._current_millis() + 1000
+
+    # Should raise error
+    with self.assertRaises(RuntimeError):
+        generator.generate_id()
+```
+
+---
+
+## 15. Interview Tips & Common Questions
+
+### Q1: "Why not use UUID?"
+
+**Answer:**
+"UUID v4 is 128 bits, which doesn't fit in a 64-bit integer. Many systems (JavaScript, some databases) have issues with 128-bit values. Additionally, UUIDs are not sortable by time, which means:
+- Poor database index locality (scattered inserts)
+- Can't easily query 'IDs created today'
+- Random I/O instead of sequential I/O
+
+Snowflake gives us 64-bit integers that are sortable, which leads to better database performance."
+
+### Q2: "What if two machines generate the same ID?"
+
+**Answer:**
+"This can't happen if machine IDs are unique. The 10-bit machine ID space allows 1024 machines, each with a unique identifier. Even if two machines generate an ID at the exact same millisecond with the same sequence number, the machine ID portion will differ, ensuring uniqueness.
+
+The critical requirement is proper machine ID assignment and management."
+
+### Q3: "How do you handle machine ID exhaustion?"
+
+**Answer:**
+"Several strategies:
+1. **Recycle IDs**: When a machine goes offline, recycle its ID after a grace period
+2. **Adjust bit allocation**: If you need more machines, reduce timestamp or sequence bits
+3. **Hierarchical IDs**: Split machine ID into datacenter (5 bits) + worker (5 bits) for better organization
+4. **Multiple ID pools**: Use different machine ID pools for different services"
+
+### Q4: "What happens during clock synchronization?"
+
+**Answer:**
+"NTP synchronization is usually gradual (slewing), not sudden jumps. However, if the clock jumps backwards:
+1. **Small jumps (<5ms)**: Wait it out (block until clock catches up)
+2. **Large jumps**: Raise an error and alert operations
+3. **Prevention**: Use multiple NTP sources and monitor for anomalies
+
+In production, we'd also monitor clock drift and alert if it exceeds thresholds."
+
+### Q5: "Can Snowflake IDs be used for distributed transactions?"
+
+**Answer:**
+"Snowflake IDs are great for entity identification but not for transaction ordering because:
+- Clock skew between machines means IDs aren't perfectly ordered globally
+- For transaction ordering, you need consensus (e.g., Paxos, Raft)
+- For causal ordering, use vector clocks or hybrid logical clocks
+
+Snowflake is best for: User IDs, Post IDs, Order IDs (entity identifiers), not for distributed transaction sequencing."
+
+---
+
+## 16. Summary & Key Takeaways
+
+### Core Concepts
+
+1. **Distributed ID Generation** requires careful balance of:
+   - Uniqueness (no duplicates)
+   - Sortability (time-ordering)
+   - Performance (low latency, high throughput)
+   - Scalability (no single point of failure)
+
+2. **Snowflake's elegance** comes from:
+   - Embedding timestamp → Sortability
+   - Embedding machine ID → No coordination
+   - Embedding sequence → High throughput per machine
+
+3. **Trade-offs to consider**:
+   - Privacy (timestamp is embedded in ID)
+   - Clock dependency (NTP required)
+   - Machine ID management (operational complexity)
+
+### When to Use What
+
+| Use Case | Recommended Approach | Reason |
+|----------|---------------------|---------|
+| **User IDs** | Snowflake | Need sortability, 64-bit, high volume |
+| **Session IDs** | UUID v4 | Security (random), no sortability needed |
+| **URLs (public)** | ULID or Custom | URL-safe, lexicographically sortable |
+| **Database PKs** | Snowflake | Index locality, range queries |
+| **API Request IDs** | UUID v4 | No central system, stateless |
+| **Sharded Systems** | Instagram-style | Need to embed shard ID for routing |
+
+### Production Checklist
+
+- [ ] Machine ID assignment strategy defined
+- [ ] NTP configured on all servers
+- [ ] Clock drift monitoring in place
+- [ ] Alerting for clock backwards events
+- [ ] Load testing completed (verify throughput)
+- [ ] Uniqueness testing across multiple machines
+- [ ] Disaster recovery plan (machine ID conflicts)
+- [ ] Documentation for on-call engineers
+
+**Next Steps:**
+- Learn about [Load Balancing](../../../01-fundamentals/networking/load-balancing.md)
+- Study [Database Sharding](../../intermediate/database-sharding/README.md)
+- Explore [Distributed Systems Patterns](../../advanced/distributed-patterns/README.md)

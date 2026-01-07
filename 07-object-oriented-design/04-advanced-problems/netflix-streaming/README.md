@@ -1,180 +1,489 @@
-# Netflix Streaming Platform - OOD Design
+# Netflix Streaming Platform - Object-Oriented Design
 
 **Difficulty:** Advanced
 **Interview Frequency:** High
-**Key Concepts:** Content Management, User Profiles, Recommendations, Watchlists
-**Companies:** Netflix, Hulu, Disney+, YouTube
+**Key Concepts:** Content Management, Streaming, Recommendations, User Profiles
+**Companies:** Netflix, Hulu, Disney+, Amazon Prime, YouTube
+**Estimated Interview Time:** 45-55 minutes
 
 ---
 
 ## Problem Statement
 
-Design a video streaming platform with content library, user profiles, watchlists, viewing history, and recommendations.
+Design a video streaming platform supporting:
+- Content library (movies, series, documentaries)
+- User profiles with personalized experience
+- Watchlists and viewing history
+- Content recommendations
+- Video playback with quality adaptation
+- Subscription management
+- Content ratings and reviews
+- Continue watching functionality
+
+**Interview Context:** Tests understanding of content delivery, personalization, recommendation systems, and managing large media libraries.
 
 ---
 
-## Implementation
+## Requirements
 
-```python
-from enum import Enum
-from typing import List, Optional, Dict
-from datetime import datetime, timedelta
+### Functional
+1. **Content:** Movies, series (seasons/episodes), documentaries
+2. **Profiles:** Multiple profiles per account, preferences
+3. **Playback:** Stream video, resume, quality selection
+4. **Discovery:** Search, browse by genre, recommendations
+5. **Watchlist:** Save content to watch later
+6. **History:** Track viewing progress, completion
+7. **Ratings:** User ratings, reviews
+8. **Subscriptions:** Plans, billing
 
+### Non-Functional
+1. **Streaming:** Low latency, adaptive bitrate
+2. **Scalability:** Millions of concurrent streams
+3. **Personalization:** Relevant recommendations
+4. **Availability:** 99.95% uptime
 
-class ContentType(Enum):
-    MOVIE = "Movie"
-    SERIES = "Series"
-    DOCUMENTARY = "Documentary"
+---
 
+## Core Concepts
 
-class Genre(Enum):
-    ACTION = "Action"
-    COMEDY = "Comedy"
-    DRAMA = "Drama"
-    SCIFI = "Sci-Fi"
+### 1. Content Hierarchy
 
+```
+Content (abstract)
+├── Movie (single video)
+├── Series
+│   ├── Season 1
+│   │   ├── Episode 1
+│   │   ├── Episode 2
+│   │   └── ...
+│   └── Season 2
+│       └── ...
+└── Documentary
+```
 
-class Content:
-    def __init__(self, content_id: int, title: str, content_type: ContentType, genre: Genre, duration_minutes: int):
-        self.content_id = content_id
-        self.title = title
-        self.content_type = content_type
-        self.genre = genre
-        self.duration_minutes = duration_minutes
-        self.rating = 0.0
+### 2. Viewing States
 
+```
+NOT_STARTED → WATCHING → PAUSED → COMPLETED
+     ↓           ↓          ↓
+  ADDED TO   CONTINUE   RESUME
+  WATCHLIST  WATCHING   LATER
+```
 
-class Episode:
-    def __init__(self, episode_id: int, title: str, season: int, episode_number: int, duration_minutes: int):
-        self.episode_id = episode_id
-        self.title = title
-        self.season = season
-        self.episode_number = episode_number
-        self.duration_minutes = duration_minutes
+### 3. Recommendation Types
 
+| Type | Description | Algorithm |
+|------|-------------|-----------|
+| **Personalized** | Based on watch history | Collaborative filtering |
+| **Trending** | Popular now | View count, recency |
+| **Because You Watched** | Similar content | Content-based |
+| **Top 10** | Most viewed | Aggregated views |
+| **New Releases** | Recently added | Sort by date |
 
-class Series(Content):
-    def __init__(self, content_id: int, title: str, genre: Genre):
-        super().__init__(content_id, title, ContentType.SERIES, genre, 0)
-        self.episodes: List[Episode] = []
+---
 
-    def add_episode(self, episode: Episode):
-        self.episodes.append(episode)
+## Class Diagram
 
+```mermaid
+classDiagram
+    class Content {
+        <<abstract>>
+        -String contentId
+        -String title
+        -String description
+        -List~Genre~ genres
+        -int releaseYear
+        -double rating
+        -int duration
+        -String thumbnailUrl
+        +play()
+        +getRating()
+    }
 
-class WatchHistory:
-    def __init__(self, content: Content, timestamp: datetime, duration_watched: int):
-        self.content = content
-        self.timestamp = timestamp
-        self.duration_watched = duration_watched  # seconds
+    class Movie {
+        -String director
+        -List~String~ cast
+        +getDetails()
+    }
 
-    def is_completed(self) -> bool:
-        return self.duration_watched >= (self.content.duration_minutes * 60 * 0.9)  # 90% watched
+    class Series {
+        -List~Season~ seasons
+        -int totalEpisodes
+        +addSeason(season)
+        +getEpisode(season, episode)
+    }
 
+    class Season {
+        -int seasonNumber
+        -List~Episode~ episodes
+        +addEpisode(episode)
+    }
 
-class UserProfile:
-    def __init__(self, profile_id: int, name: str):
-        self.profile_id = profile_id
-        self.name = name
-        self.watch_history: List[WatchHistory] = []
-        self.watchlist: List[Content] = []
+    class Episode {
+        -int episodeNumber
+        -String title
+        -int duration
+        -String videoUrl
+    }
 
-    def add_to_watchlist(self, content: Content):
-        if content not in self.watchlist:
-            self.watchlist.append(content)
+    class Genre {
+        <<enumeration>>
+        ACTION
+        COMEDY
+        DRAMA
+        SCIFI
+        DOCUMENTARY
+        THRILLER
+    }
 
-    def watch_content(self, content: Content, duration_seconds: int):
-        history = WatchHistory(content, datetime.now(), duration_seconds)
-        self.watch_history.append(history)
+    class UserAccount {
+        -String accountId
+        -String email
+        -Subscription subscription
+        -List~Profile~ profiles
+        -PaymentMethod payment
+        +createProfile(name)
+        +switchProfile(profileId)
+    }
 
-    def get_recommended(self, all_content: List[Content]) -> List[Content]:
-        # Simple recommendation based on genre preference
-        watched_genres = [h.content.genre for h in self.watch_history]
-        if not watched_genres:
-            return all_content[:5]
+    class Profile {
+        -String profileId
+        -String name
+        -AgeRating maturityLevel
+        -List~Content~ watchlist
+        -Map~Content,ViewingProgress~ history
+        -UserPreferences preferences
+        +addToWatchlist(content)
+        +updateProgress(content, progress)
+        +getRecommendations()
+    }
 
-        # Most common genre
-        most_common = max(set(watched_genres), key=watched_genres.count)
-        recommendations = [c for c in all_content if c.genre == most_common and c not in [h.content for h in self.watch_history]]
-        return recommendations[:5]
+    class ViewingProgress {
+        -Content content
+        -int watchedDuration
+        -int totalDuration
+        -DateTime lastWatched
+        -bool completed
+        +getPercentage()
+        +isCompleted()
+    }
 
+    class Watchlist {
+        -Profile profile
+        -List~Content~ items
+        -DateTime addedAt
+        +add(content)
+        +remove(content)
+        +getAll()
+    }
 
-class Subscription:
-    def __init__(self, user_id: int, plan: str):
-        self.user_id = user_id
-        self.plan = plan  # Basic, Standard, Premium
-        self.start_date = datetime.now()
-        self.is_active = True
+    class VideoPlayer {
+        -Content content
+        -int currentPosition
+        -VideoQuality quality
+        -PlaybackState state
+        +play()
+        +pause()
+        +seek(position)
+        +changeQuality(quality)
+    }
 
-    def can_watch(self) -> bool:
-        return self.is_active
+    class VideoQuality {
+        <<enumeration>>
+        SD_480p
+        HD_720p
+        FULL_HD_1080p
+        UHD_4K
+    }
 
+    class PlaybackState {
+        <<enumeration>>
+        PLAYING
+        PAUSED
+        BUFFERING
+        STOPPED
+    }
 
-class NetflixPlatform:
-    def __init__(self):
-        self.content_library: List[Content] = []
-        self.subscriptions: Dict[int, Subscription] = {}
-        self.profiles: Dict[int, UserProfile] = {}
+    class Subscription {
+        -String subscriptionId
+        -SubscriptionPlan plan
+        -DateTime startDate
+        -DateTime renewalDate
+        -SubscriptionStatus status
+        +renew()
+        +cancel()
+        +upgrade(plan)
+    }
 
-    def add_content(self, content: Content):
-        self.content_library.append(content)
+    class SubscriptionPlan {
+        <<enumeration>>
+        BASIC
+        STANDARD
+        PREMIUM
+    }
 
-    def create_profile(self, user_id: int, profile: UserProfile):
-        self.profiles[profile.profile_id] = profile
+    class RecommendationEngine {
+        -CollaborativeFilter collaborativeFilter
+        -ContentBasedFilter contentFilter
+        +getPersonalized(profile)
+        +getTrending()
+        +getSimilar(content)
+    }
 
-    def search_content(self, query: str) -> List[Content]:
-        return [c for c in self.content_library if query.lower() in c.title.lower()]
+    class SearchEngine {
+        -ContentIndex index
+        +search(query)
+        +autocomplete(prefix)
+        +filterByGenre(genre)
+    }
 
-    def stream_content(self, profile_id: int, content_id: int) -> bool:
-        profile = self.profiles.get(profile_id)
-        content = next((c for c in self.content_library if c.content_id == content_id), None)
+    class Rating {
+        -Profile profile
+        -Content content
+        -int score
+        -String review
+        -DateTime timestamp
+        +submit()
+    }
 
-        if not profile or not content:
-            return False
-
-        print(f"✓ Streaming '{content.title}' on profile '{profile.name}'")
-        return True
-
-
-def main():
-    platform = NetflixPlatform()
-
-    # Add content
-    movie1 = Content(1, "Inception", ContentType.MOVIE, Genre.SCIFI, 148)
-    movie2 = Content(2, "The Matrix", ContentType.MOVIE, Genre.SCIFI, 136)
-    movie3 = Content(3, "Superbad", ContentType.MOVIE, Genre.COMEDY, 113)
-
-    platform.add_content(movie1)
-    platform.add_content(movie2)
-    platform.add_content(movie3)
-
-    # Create profile
-    profile = UserProfile(1, "Alice")
-    platform.create_profile(1, profile)
-
-    # Watch content
-    profile.watch_content(movie1, 8000)  # watched most of it
-
-    # Get recommendations
-    recommendations = profile.get_recommended(platform.content_library)
-    print(f"\nRecommendations for {profile.name}:")
-    for content in recommendations:
-        print(f"  - {content.title} ({content.genre.value})")
-
-    # Add to watchlist
-    profile.add_to_watchlist(movie2)
-    print(f"\nWatchlist: {[c.title for c in profile.watchlist]}")
-
-
-if __name__ == "__main__":
-    main()
+    Content <|-- Movie
+    Content <|-- Series
+    Content <|-- Episode
+    Content --> Genre
+    Series --> Season
+    Season --> Episode
+    UserAccount --> Profile
+    UserAccount --> Subscription
+    Profile --> Watchlist
+    Profile --> ViewingProgress
+    Profile --> Rating
+    ViewingProgress --> Content
+    Watchlist --> Content
+    VideoPlayer --> Content
+    VideoPlayer --> VideoQuality
+    VideoPlayer --> PlaybackState
+    Subscription --> SubscriptionPlan
+    Rating --> Profile
+    Rating --> Content
 ```
 
 ---
 
 ## Design Patterns
-- **Strategy:** Different recommendation algorithms
-- **Observer:** Notify on new content
-- **Proxy:** Streaming with quality adaptation
 
-This tests content management, user personalization, and recommendation systems.
+### 1. Composite Pattern (Content Hierarchy)
+- Series contains Seasons contains Episodes
+- Treat individual and composite uniformly
+
+### 2. Strategy Pattern (Recommendations)
+- Different recommendation algorithms
+- Collaborative, content-based, hybrid
+- A/B testing different strategies
+
+### 3. Observer Pattern (Viewing Events)
+- Track playback events
+- Update watch history
+- Trigger recommendations refresh
+
+### 4. Proxy Pattern (Video Streaming)
+- CDN proxy for video delivery
+- Caching, buffering
+- Adaptive bitrate streaming
+
+### 5. State Pattern (Playback)
+- Playing, Paused, Buffering states
+- State-specific behavior
+
+---
+
+## Key Components
+
+### 1. Recommendation System
+
+**Collaborative Filtering:**
+```
+User A watched: [Movie1, Movie2, Movie3]
+User B watched: [Movie1, Movie2, Movie4]
+Recommendation for A: Movie4 (watched by similar user B)
+```
+
+**Content-Based:**
+```
+User watched: Action movie with Tom Hanks
+Recommend: Other action movies or Tom Hanks movies
+Features: Genre, actors, director, keywords
+```
+
+**Matrix Factorization:**
+```
+User-Content matrix → Latent factors
+Predict rating for unseen content
+Recommend top-rated predictions
+```
+
+### 2. Adaptive Bitrate Streaming
+
+**Algorithm:**
+```
+Measure available bandwidth
+If bandwidth > 5 Mbps: Stream 1080p
+If bandwidth 2-5 Mbps: Stream 720p
+If bandwidth < 2 Mbps: Stream 480p
+
+Continuously monitor and adapt
+```
+
+**Technologies:**
+- HLS (HTTP Live Streaming)
+- MPEG-DASH
+- Segment-based delivery
+
+### 3. Continue Watching Logic
+
+**Algorithm:**
+```
+For each content in viewing history:
+  if watchedPercentage >= 90%:
+    mark as completed
+  elif watchedPercentage >= 5% and < 90%:
+    add to "Continue Watching"
+  else:
+    don't show (barely started)
+
+Sort by lastWatched (most recent first)
+```
+
+---
+
+## Implementation Approach
+
+### Phase 1: Content Model (10 min)
+1. Content hierarchy (Movie, Series, Episode)
+2. Genre classification
+3. Basic metadata
+
+### Phase 2: User System (10 min)
+1. UserAccount, Profile classes
+2. Watchlist, viewing history
+3. Subscription plans
+
+### Phase 3: Playback (10 min)
+1. VideoPlayer with state
+2. Progress tracking
+3. Resume functionality
+
+### Phase 4: Recommendations (15 min)
+1. Viewing history analysis
+2. Simple recommendation (genre-based)
+3. Trending content
+
+### Phase 5: Advanced (10 min)
+1. Search functionality
+2. Ratings and reviews
+3. Subscription management
+
+---
+
+## Common Pitfalls
+
+### 1. Not Handling Series Complexity
+❌ Treat series as single video
+✅ Model seasons and episodes properly
+
+### 2. Ignoring Multiple Profiles
+❌ One watch history per account
+✅ Separate history, watchlist per profile
+
+### 3. Poor Recommendation Quality
+❌ Random content suggestions
+✅ Personalized based on watch history
+
+### 4. Not Tracking Progress
+❌ Start from beginning every time
+✅ Resume from last position
+
+### 5. Hardcoded Video URLs
+❌ Direct video file paths
+✅ CDN URLs, adaptive streaming
+
+---
+
+## Follow-up Questions
+
+### Easy
+1. **Q:** How would you add parental controls?
+   - **A:** AgeRating per content, maturityLevel per profile, filter content
+
+2. **Q:** How would you implement download for offline viewing?
+   - **A:** DownloadManager, store locally, DRM protection, expire after period
+
+3. **Q:** How would you add subtitle support?
+   - **A:** Subtitle class with language, file URL, sync with video timeline
+
+### Medium
+4. **Q:** How would you implement "Skip Intro" feature?
+   - **A:** Store intro timestamp ranges, detect when playing, show skip button
+
+5. **Q:** How would you handle content expiration (licensing)?
+   - **A:** ExpiryDate on content, cron job to check, hide expired, notify users
+
+6. **Q:** How would you add social features (watch parties)?
+   - **A:** WatchParty class, sync playback, chat, invite system
+
+7. **Q:** How would you implement content caching at edge?
+   - **A:** CDN integration, cache popular content, geographic distribution
+
+### Hard
+8. **Q:** How would you scale to 100M concurrent viewers?
+   - **A:** CDN (Akamai, CloudFlare), microservices, database sharding, caching
+
+9. **Q:** How would you design the recommendation system?
+   - **A:** Collaborative filtering, deep learning models, feature engineering, A/B testing
+
+10. **Q:** How would you handle peak traffic (new season release)?
+    - **A:** Pre-cache content, auto-scaling, rate limiting, queue system
+
+11. **Q:** How would you implement real-time analytics (who's watching what)?
+    - **A:** Event streaming (Kafka), stream processing, real-time dashboards
+
+12. **Q:** How would you add live streaming (sports, events)?
+    - **A:** Live HLS/DASH streams, different architecture, lower latency, real-time chat
+
+---
+
+## System Design Considerations
+
+### Content Delivery
+- **CDN:** Global distribution, reduce latency
+- **Encoding:** Multiple bitrates, formats
+- **Storage:** S3 for videos, distributed storage
+
+### Recommendations
+- **Batch processing:** Nightly model training
+- **Real-time:** Update on each interaction
+- **A/B testing:** Compare algorithms
+
+### Scalability
+- **Microservices:** Catalog, streaming, recommendations
+- **Caching:** Redis for metadata, hot content
+- **Database:** Cassandra for viewing history
+
+---
+
+## Key Takeaways
+
+### ✅ What Interviewers Look For
+1. Content hierarchy (series/episodes)
+2. Personalization (profiles, recommendations)
+3. Streaming concepts (adaptive bitrate)
+4. Scalability (CDN, caching)
+
+### 📋 Interview Strategy
+1. **Clarify (5 min):** Content types? Profiles? Recommendations?
+2. **Design (15 min):** Content model, user profiles
+3. **Implement (20 min):** Playback, history, watchlist
+4. **Advanced (15 min):** Recommendations, streaming, scale
+
+---
+
+**Pro Tip:** Focus on the content hierarchy (especially series/seasons/episodes) and how to model it. Discuss recommendations at a high level—mention collaborative filtering and content-based. For streaming, mention CDN and adaptive bitrate. This often transitions to system design discussions about scaling video delivery and building recommendation engines.

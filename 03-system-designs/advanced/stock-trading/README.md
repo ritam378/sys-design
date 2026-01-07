@@ -1,12 +1,39 @@
 # Stock Trading System Design
 
-## Overview
+> **Difficulty:** Advanced
+> **Topics:** Order Matching, Low-Latency Systems, ACID Transactions, Event Sourcing, Market Microstructure
+> **Companies:** Robinhood, E*TRADE, Interactive Brokers, Coinbase, Trading Firms (Jane Street, Citadel)
 
-A **stock trading system** enables users to buy and sell securities with low latency, high throughput, and strong consistency guarantees.
+---
 
-Examples: Robinhood, E*TRADE, Interactive Brokers, Nasdaq
+## 1. Problem Statement
 
-## Requirements
+Design a **stock trading platform** that enables users to buy and sell securities with ultra-low latency, high throughput, and strong consistency guarantees.
+
+### Core Requirements
+
+**Users can:**
+- Place orders (market, limit, stop-loss, stop-limit)
+- View real-time stock prices and charts
+- Check portfolio and positions
+- View order book (market depth)
+- Receive trade confirmations instantly
+- Track performance and P/L
+
+**System must:**
+- Match orders in <10ms (microseconds for HFT)
+- Handle 100,000+ orders per second
+- Ensure ACID transactions (no partial fills without confirmation)
+- Maintain strict FIFO ordering (price-time priority)
+- Provide audit trail for compliance
+- Handle market volatility and circuit breakers
+- Prevent fraud and wash trading
+
+**Real-world Examples:** Nasdaq, NYSE, Robinhood, Coinbase, Interactive Brokers
+
+---
+
+## 2. Requirements
 
 ### Functional Requirements
 1. **Place orders**: Market, limit, stop-loss orders

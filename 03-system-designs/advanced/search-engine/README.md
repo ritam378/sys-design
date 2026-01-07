@@ -1,12 +1,36 @@
 # Search Engine System Design
 
-## Overview
+> **Difficulty:** Advanced
+> **Topics:** Web Crawling, Inverted Index, PageRank, Distributed Systems, Information Retrieval
+> **Companies:** Google, Microsoft (Bing), DuckDuckGo, Elasticsearch, Algolia
 
-A **search engine** is a distributed system that crawls, indexes, and ranks billions of web pages to provide relevant search results in milliseconds.
+---
 
-Examples: Google, Bing, DuckDuckGo, Elasticsearch
+## 1. Problem Statement
 
-## Requirements
+Design a **web-scale search engine** that can crawl, index, and search billions of web pages, returning relevant results in under 200 milliseconds.
+
+### Core Challenges
+
+**Users expect:**
+- Find relevant pages among billions of results
+- Search results returned in <200ms
+- Handle typos and understand intent
+- Fresh results (recently published content)
+- Personalized and localized results
+
+**System must:**
+- Crawl and index the entire web (billions of pages)
+- Handle millions of queries per second
+- Rank results by relevance
+- Scale horizontally
+- Update index continuously
+
+**Real-world Examples:** Google Search, Bing, DuckDuckGo, Elasticsearch
+
+---
+
+## 2. Requirements
 
 ### Functional Requirements
 1. **Crawl** billions of web pages
